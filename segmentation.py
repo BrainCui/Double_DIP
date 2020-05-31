@@ -89,4 +89,4 @@ class Segmentation(object):
 seg = Segmentation()
 input_img = mpimg.imread('./data/zebra.bmp').astype(np.float32) / 255
 input_img = torch.from_numpy(input_img.transpose(2, 0, 1))
-seg.train(input_img, epochs=4000, learn_rate=0.001)
+seg.train(input_img, epoch1=2000, epochs2=5000, learn_rate=0.001)
