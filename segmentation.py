@@ -41,7 +41,7 @@ class Segmentation(object):
             optimizer.zero_grad()
             if epoch == epochs_2 - 1:
                 pert = 0
-            elif iteration < 1000:
+            elif epoch < 1000:
                 pert = (1 / 1000.) * (epoch // 100)
             else:
                 pert = 1 / 1000.
