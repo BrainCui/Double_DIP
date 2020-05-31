@@ -40,9 +40,9 @@ class DIP(nn.Module):
             skip = nn.Sequential()  # skip connection
             if skip_channels[i] != 0:
                 # 该层的skip
-                skip.add_module('conv', nn.Conv2d(in_channels=in_channels, out_channels=skip_channels[i],
+                skip.add_module('conv', nn.Conv2d(in_channels=down_channels[i], out_channels=skip_channels[i],
                                    kernel_size=3, stride=1, padding=1))
-                skip.add_module('bn', nn.BatchNorm2d(num_features=skip_channels))
+                skip.add_module('bn', nn.BatchNorm2d(num_features=skip_channels[i]))
                 skip.add_module('relu', nn.LeakyReLU(0.2, inplace=True))
                 model_temp.add_module('skip+deeper', Concat(skip, deeper))  # 把该层的deeper和skip连接
             else:
