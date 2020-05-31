@@ -18,12 +18,26 @@ class Segmentation(object):
                           [p for p in self.mask_net.parameters()]
         self.l1_loss = nn.L1Loss().to(device)
 
-    def train(self, input_img, epochs, learn_rate):
+    def train(self, input_img, epochs_1, epochs_2, learn_rate):
         input_img = input_img.unsqueeze(0).to(device)
         width = input_img.shape[2]
         height = input_img.shape[3]
         optimizer = torch.optim.Adam(self.parameters, lr=learn_rate)
-        for epoch in range(epochs):
+
+
+        print('optimize Mask to central value:')
+        # 先将mask优化至中间值(每个像素都是0.5)
+        for epoch in range(epochs_2):
+            optimizer.zero_grad()
+            noize_mask = torch.ones((1, 2, width, height)).uniform_(-0.5, 0.5).to(device)
+            mask_out = self.mask_net(noize_mask).to(device)
+            loss = self.l1_loss(mask_out, torch.ones_like(mask_out) / 2)
+            loss.backward(retain_graph=True)
+            optimizer.step()
+            print('\tEpoch  {}  loss = {:.7f}'.format(epoch + 1, loss))
+
+        print('optimize Double-DIP:')
+        for epoch in range(epochs_1):
             optimizer.zero_grad()
             noize_left = torch.ones((1, 2, width, height)).uniform_(-0.5, 0.5).to(device)
             noize_right = torch.ones((1, 2, width, height)).uniform_(-0.5, 0.5).to(device)
@@ -36,7 +50,7 @@ class Segmentation(object):
                 self.reg_loss(mask_out)
             loss.backward(retain_graph=True)
             optimizer.step()
-            print('Epoch  {}  loss = {:.7f}'.format(epoch + 1, loss))
+            print('\tEpoch  {}  loss = {:.7f}'.format(epoch + 1, loss))
             if (epoch % 500 == 0):
                 self.plot(str(epoch), input_img, left_out, right_out, mask_out)
 
@@ -75,5 +89,4 @@ class Segmentation(object):
 seg = Segmentation()
 input_img = mpimg.imread('./data/zebra.bmp').astype(np.float32) / 255
 input_img = torch.from_numpy(input_img.transpose(2, 0, 1))
-print(input_img)
 seg.train(input_img, epochs=4000, learn_rate=0.001)
