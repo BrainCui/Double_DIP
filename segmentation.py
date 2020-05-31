@@ -18,20 +18,22 @@ class Segmentation(object):
                           [p for p in self.mask_net.parameters()]
         self.l1_loss = nn.L1Loss().to(device)
 
-    def train(self, input_img, epochs_1, epochs_2, learn_rate):
+    def train(self, input_img, fg_hint, bg_hint, epochs_1, epochs_2, learn_rate):
+        self.width = input_img.shape[2]
+        self.height = input_img.shape[3]
         input_img = input_img.unsqueeze(0).to(device)
-        width = input_img.shape[2]
-        height = input_img.shape[3]
+        fg_hint = fg_hint.unsqueeze(0).to(device)
+        bg_hint = fg_hint.unsqueeze(0).to(device)
         optimizer = torch.optim.Adam(self.parameters, lr=learn_rate)
-
 
         print('optimize Mask to central value:')
         # 先将mask优化至中间值(每个像素都是0.5)
         for epoch in range(epochs_1):
             optimizer.zero_grad()
-            noize_mask = torch.ones((1, 2, width, height)).uniform_(-0.5, 0.5).to(device)
-            mask_out = self.mask_net(noize_mask).to(device)
-            loss = self.l1_loss(mask_out, torch.ones_like(mask_out) / 2)
+
+            left_out, right_out, mask_out = self.forward_all(epoch, epochs_1)
+
+            loss = self.pre_loss(input_img, left_out, right_out, mask_out, fg_hint, bg_hint)
             loss.backward(retain_graph=True)
             optimizer.step()
             print('\tEpoch  {}  loss = {:.7f}'.format(epoch + 1, loss))
@@ -39,31 +41,61 @@ class Segmentation(object):
         print('optimize Double-DIP:')
         for epoch in range(epochs_2):
             optimizer.zero_grad()
-            if epoch == epochs_2 - 1:
-                pert = 0
-            elif epoch < 1000:
-                pert = (1 / 1000.) * (epoch // 100)
-            else:
-                pert = 1 / 1000.
-            noize_left = torch.ones((1, 2, width, height)).uniform_(-0.5, 0.5).to(device)
-            noize_right = torch.ones((1, 2, width, height)).uniform_(-0.5, 0.5).to(device)
-            noize_mask = torch.ones((1, 2, width, height)).uniform_(-0.5, 0.5).to(device)
-            noize_left += (noize_left.clone().normal_() * pert).to(device)
-            noize_right += (noize_right.clone().normal_() * pert).to(device)
-            noize_mask += (noize_mask.clone().normal_() * pert).to(device)
-            
-            left_out = self.left_net(noize_left).to(device) 
-            right_out = self.right_net(noize_right).to(device)
-            mask_out = self.mask_net(noize_mask).to(device)
-            # print('forward finished')
-            loss = 0.5 * self.reconst_loss(mask_out * left_out + (1 - mask_out) * right_out, input_img) + \
-                (0.001 * (epoch // 100)) * self.reg_loss(mask_out)
+
+            left_out, right_out, mask_out = self.forward_all(epoch, epochs_2)
+
+            loss = self.total_loss(epoch, input_img, left_out, right_out, mask_out, fg_hint, bg_hint)
             loss.backward(retain_graph=True)
             optimizer.step()
             print('\tEpoch  {}  loss = {:.7f}'.format(epoch + 1, loss))
-            if (epoch % 500 == 0):
+            if epoch % 500 == 0:
                 self.plot(str(epoch), input_img, left_out, right_out, mask_out)
+        self.plot('final', input_img, left_out, right_out, mask_out)
 
+    def forward_all(self, epoch, max_epoch):
+        if epoch == max_epoch - 1:
+            pert = 0
+        elif epoch < 1000:
+            pert = (1 / 1000.) * (epoch // 100)
+        else:
+            pert = 1 / 1000.
+        noize_left = torch.ones((1, 2, self.width, self.height)).uniform_(-0.5, 0.5).to(device)
+        noize_right = torch.ones((1, 2, self.width, self.height)).uniform_(-0.5, 0.5).to(device)
+        noize_mask = torch.ones((1, 2, self.width, self.height)).uniform_(-0.5, 0.5).to(device)
+        noize_left += (noize_left.clone().normal_() * pert).to(device)
+        noize_right += (noize_right.clone().normal_() * pert).to(device)
+        noize_mask += (noize_mask.clone().normal_() * pert).to(device)
+        left_out = self.left_net(noize_left).to(device)
+        right_out = self.right_net(noize_right).to(device)
+        mask_out = self.mask_net(noize_mask).to(device)
+        return left_out, right_out, mask_out
+
+    def pre_loss(self, input_img, left_out, right_out, mask_out, fg_hint, bg_hint):
+        loss = 0
+        loss += self.l1_loss(mask_out, torch.ones_like(mask_out) / 2)
+        normalizer = self.l1_loss(fg_hint, torch.zeros(fg_hint.shape).cuda())
+        loss += self.l1_loss(fg_hint * input_img, fg_hint * left_out) / normalizer
+
+        normalizer = self.l1_loss(bg_hint, torch.zeros(bg_hint.shape).cuda())
+        loss += self.l1_loss(bg_hint * input_img, bg_hint * right_out) / normalizer
+
+        loss += self.l1_loss((fg_hint - bg_hint + 1) / 2, mask_out)
+
+        return loss
+
+    def total_loss(self, epoch, input_img, left_out, right_out, mask_out, fg_hint, bg_hint):
+        loss = 0
+        loss += 0.5 * self.reconst_loss(mask_out * left_out + (1 - mask_out) * right_out, input_img) + \
+                (0.001 * (epoch // 100)) * self.reg_loss(mask_out)
+
+        if epoch <= 1000:  #
+            normalizer = self.l1_loss(fg_hint, torch.zeros(fg_hint.shape).cuda())
+            loss += self.l1_loss(fg_hint * input_img, fg_hint * left_out) / normalizer
+
+            normalizer = self.l1_loss(bg_hint, torch.zeros(bg_hint.shape).cuda())
+            loss += self.l1_loss(bg_hint * input_img, bg_hint * right_out) / normalizer
+
+        return loss
 
     def reconst_loss(self, input_img, recomp_img):
         '''
