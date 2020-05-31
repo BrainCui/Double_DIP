@@ -3,7 +3,6 @@ import torch.nn as nn
 import torchvision
 from draw import *
 import numpy as np
-import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 from net.DIP import DIP
 
