@@ -23,7 +23,7 @@ class Segmentation(object):
         self.height = input_img.shape[3]
         input_img = input_img.unsqueeze(0).to(device)
         fg_hint = fg_hint.unsqueeze(0).to(device)
-        bg_hint = fg_hint.unsqueeze(0).to(device)
+        bg_hint = bg_hint.unsqueeze(0).to(device)
         optimizer = torch.optim.Adam(self.parameters, lr=learn_rate)
 
         print('optimize Mask to central value:')
@@ -131,4 +131,13 @@ class Segmentation(object):
 seg = Segmentation()
 input_img = mpimg.imread('./data/zebra.bmp').astype(np.float32) / 255
 input_img = torch.from_numpy(input_img.transpose(2, 0, 1))
-seg.train(input_img, epochs_1=2000, epochs_2=5000, learn_rate=0.001)
+
+fg_hint = mpimg.imread('./data/fg_hint.bmp').astype(np.float32) / 255
+fg_hint = torch.from_numpy(fg_hint.transpose(2, 0, 1))
+print(fg_hint)
+
+bg_hint = mpimg.imread('./data/bg_hint.bmp').astype(np.float32) / 255
+bg_hint = torch.from_numpy(bg_hint.transpose(2, 0, 1))
+print(bg_hint)
+
+seg.train(input_img, fg_hint, bg_hint, epochs_1=2000, epochs_2=5000, learn_rate=0.001)
