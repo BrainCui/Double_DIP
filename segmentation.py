@@ -31,12 +31,14 @@ class Segmentation(object):
             left_out = self.left_net(noize_left).to(device)
             right_out = self.right_net(noize_right).to(device)
             mask_out = self.mask_net(noize_mask).to(device)
+            # print('forward finished')
             loss = 0.5 * self.reconst_loss(mask_out * left_out + (1 - mask_out) * right_out, input_img) + \
                 self.reg_loss(mask_out)
-            loss.backward()
+            loss.backward(retain_graph=True)
             optimizer.step()
             print('Epoch  {}  loss = {:.7f}'.format(epoch + 1, loss))
-            self.plot(str(epoch), input_img, left_out, right_out, mask_out)
+            if (epoch % 500 == 0):
+                self.plot(str(epoch), input_img, left_out, right_out, mask_out)
 
 
     def reconst_loss(self, input_img, recomp_img):
@@ -74,4 +76,4 @@ seg = Segmentation()
 input_img = mpimg.imread('./data/zebra.bmp').astype(np.float32) / 255
 input_img = torch.from_numpy(input_img.transpose(2, 0, 1))
 print(input_img)
-seg.train(input_img, epochs=1000, learn_rate=0.001)
+seg.train(input_img, epochs=4000, learn_rate=0.001)

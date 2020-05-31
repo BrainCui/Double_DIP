@@ -12,6 +12,7 @@ class DIP(nn.Module):
         super(DIP, self).__init__()
         assert len(down_channels) == len(up_channels)
         self.model = nn.Sequential()
+        self.add_module('model', self.model)
         model_temp = self.model
         for i in range(len(down_channels)):
 
