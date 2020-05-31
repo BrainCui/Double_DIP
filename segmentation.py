@@ -27,7 +27,7 @@ class Segmentation(object):
 
         print('optimize Mask to central value:')
         # 先将mask优化至中间值(每个像素都是0.5)
-        for epoch in range(epochs_2):
+        for epoch in range(epochs_1):
             optimizer.zero_grad()
             noize_mask = torch.ones((1, 2, width, height)).uniform_(-0.5, 0.5).to(device)
             mask_out = self.mask_net(noize_mask).to(device)
@@ -37,17 +37,27 @@ class Segmentation(object):
             print('\tEpoch  {}  loss = {:.7f}'.format(epoch + 1, loss))
 
         print('optimize Double-DIP:')
-        for epoch in range(epochs_1):
+        for epoch in range(epochs_2):
             optimizer.zero_grad()
+            if epoch == epochs_2 - 1:
+                pert = 0
+            elif iteration < 1000:
+                pert = (1 / 1000.) * (epoch // 100)
+            else:
+                pert = 1 / 1000.
             noize_left = torch.ones((1, 2, width, height)).uniform_(-0.5, 0.5).to(device)
             noize_right = torch.ones((1, 2, width, height)).uniform_(-0.5, 0.5).to(device)
             noize_mask = torch.ones((1, 2, width, height)).uniform_(-0.5, 0.5).to(device)
-            left_out = self.left_net(noize_left).to(device)
+            noize_left += (noize_left.clone().normal_() * pert).to(device)
+            noize_right += (noize_right.clone().normal_() * pert).to(device)
+            noize_mask += (noize_mask.clone().normal_() * pert).to(device)
+            
+            left_out = self.left_net(noize_left).to(device) 
             right_out = self.right_net(noize_right).to(device)
             mask_out = self.mask_net(noize_mask).to(device)
             # print('forward finished')
             loss = 0.5 * self.reconst_loss(mask_out * left_out + (1 - mask_out) * right_out, input_img) + \
-                self.reg_loss(mask_out)
+                (0.001 * (epoch // 100)) * self.reg_loss(mask_out)
             loss.backward(retain_graph=True)
             optimizer.step()
             print('\tEpoch  {}  loss = {:.7f}'.format(epoch + 1, loss))
@@ -89,4 +99,4 @@ class Segmentation(object):
 seg = Segmentation()
 input_img = mpimg.imread('./data/zebra.bmp').astype(np.float32) / 255
 input_img = torch.from_numpy(input_img.transpose(2, 0, 1))
-seg.train(input_img, epoch1=2000, epochs2=5000, learn_rate=0.001)
+seg.train(input_img, epochs_1=2000, epochs_2=5000, learn_rate=0.001)
