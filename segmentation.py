@@ -74,6 +74,7 @@ class Segmentation(object):
     def pre_loss(self, input_img, left_out, right_out, mask_out, fg_hint, bg_hint):
         loss = 0
         loss += self.l1_loss(mask_out, torch.ones_like(mask_out) / 2)
+
         normalizer = self.l1_loss(fg_hint, torch.zeros(fg_hint.shape).cuda())
         loss += self.l1_loss(fg_hint * input_img, fg_hint * left_out) / normalizer
 
@@ -86,6 +87,7 @@ class Segmentation(object):
 
     def total_loss(self, epoch, input_img, left_out, right_out, mask_out, fg_hint, bg_hint):
         loss = 0
+        epoch = min(epoch, 1000)
         loss += 0.5 * self.reconst_loss(mask_out * left_out + (1 - mask_out) * right_out, input_img) + \
                 (0.001 * (epoch // 100)) * self.reg_loss(mask_out)
 
