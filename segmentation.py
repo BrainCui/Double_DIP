@@ -5,18 +5,58 @@ from draw import *
 import numpy as np
 import matplotlib.image as mpimg
 from net.DIP import DIP
+from net.losses import ExclusionLoss
+from net import skip, skip_mask
+from PIL import Image
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class Segmentation(object):
     def __init__(self):
-        self.left_net = DIP(out_channels=3).to(device)
-        self.right_net = DIP(out_channels=3).to(device)
-        self.mask_net = DIP(out_channels=1).to(device)
+        # self.left_net = DIP(out_channels=3).to(device)
+        # self.right_net = DIP(out_channels=3).to(device)
+        # self.mask_net = DIP(out_channels=1).to(device)
+        left_net = skip(
+            2, 3,
+            num_channels_down=[8, 16, 32],
+            num_channels_up=[8, 16, 32],
+            num_channels_skip=[0, 0, 0],
+            upsample_mode='bilinear',
+            filter_size_down=3,
+            filter_size_up=3,
+            need_sigmoid=True, need_bias=True, pad='reflection', act_fun='LeakyReLU')
+
+        self.left_net = left_net.type(torch.cuda.FloatTensor)
+
+        right_net = skip(
+            2, 3,
+            num_channels_down=[8, 16, 32],
+            num_channels_up=[8, 16, 32],
+            num_channels_skip=[0, 0, 0],
+            upsample_mode='bilinear',
+            filter_size_down=3,
+            filter_size_up=3,
+            need_sigmoid=True, need_bias=True, pad='reflection', act_fun='LeakyReLU')
+
+        self.right_net = right_net.type(torch.cuda.FloatTensor)
+
+        mask_net = skip_mask(
+            2, 1,
+            num_channels_down=[8, 16, 32],
+            num_channels_up=[8, 16, 32],
+            num_channels_skip=[0, 0, 0],
+            filter_size_down=3,
+            filter_size_up=3,
+            upsample_mode='bilinear',
+            need_sigmoid=True, need_bias=True, pad='reflection', act_fun='LeakyReLU')
+
+        self.mask_net = mask_net.type(torch.cuda.FloatTensor)
+
         self.parameters = [p for p in self.left_net.parameters()] + \
                           [p for p in self.right_net.parameters()] + \
                           [p for p in self.mask_net.parameters()]
         self.l1_loss = nn.L1Loss().to(device)
+        self.excl_loss = ExclusionLoss()
 
     def train(self, input_img, fg_hint, bg_hint, epochs_1, epochs_2, learn_rate):
         input_img = input_img.unsqueeze(0).to(device)
@@ -89,7 +129,7 @@ class Segmentation(object):
         loss = 0
         epoch = min(epoch, 1000)
         loss += 0.5 * self.reconst_loss(mask_out * left_out + (1 - mask_out) * right_out, input_img) + \
-                (0.001 * (epoch // 100)) * self.reg_loss(mask_out)
+                (0.001 * (epoch // 100)) * self.reg_loss(mask_out) + 0.3 * self.excl_loss(left_out, right_out)
 
         if epoch <= 1000:  #
             normalizer = self.l1_loss(fg_hint, torch.zeros(fg_hint.shape).cuda())
@@ -132,21 +172,32 @@ class Segmentation(object):
 
 
 seg = Segmentation()
-input_img = mpimg.imread('./data/zebra.bmp').astype(np.float32) / 255
+downsample = (64, 48)
+input_img = Image.open('./data/zebra.bmp')
+input_img = input_img.resize(downsample)
+input_img = np.array(input_img).astype(np.float32) / 255
+print(input_img.shape)
 input_img = torch.from_numpy(input_img.transpose(2, 0, 1))
 
-fg_hint = mpimg.imread('./data/fg_hint.bmp').astype(np.float32) / 255
-fg_hint = fg_hint[:, :, 0]
+fg_hint = Image.open('./data/fg_hint.bmp')
+fg_hint = fg_hint.resize(downsample)
+fg_hint = np.array(fg_hint)
+print(fg_hint)
+fg_hint = fg_hint.astype(np.float32)
 fg_hint = torch.from_numpy(fg_hint).unsqueeze(0)
 print(fg_hint.shape)
 print(torch.min(fg_hint))
 print(torch.max(fg_hint))
 
-bg_hint = mpimg.imread('./data/bg_hint.bmp').astype(np.float32) / 255
-bg_hint = bg_hint[:, :, 0]
+bg_hint = Image.open('./data/bg_hint.bmp')
+bg_hint = bg_hint.resize(downsample)
+bg_hint = np.array(bg_hint)
+print(bg_hint)
+bg_hint = bg_hint.astype(np.float32)
 bg_hint = torch.from_numpy(bg_hint).unsqueeze(0)
+
 print(bg_hint.shape)
 print(torch.min(bg_hint))
 print(torch.max(bg_hint))
 
-seg.train(input_img, fg_hint, bg_hint, epochs_1=2000, epochs_2=5000, learn_rate=0.001)
+seg.train(input_img, fg_hint, bg_hint, epochs_1=2000, epochs_2=50000, learn_rate=0.001)

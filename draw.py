@@ -3,6 +3,7 @@ import torch.nn as nn
 import torchvision
 import numpy as np
 import matplotlib
+import os
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
@@ -19,6 +20,8 @@ def plot_image_grid(name, images_np, interpolation='lanczos', output_path="outpu
         nrow: how many images will be in one row
         interpolation: interpolation used in plt.imshow
     """
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
     assert len(images_np) == 2
     n_channels = max(x.shape[0] for x in images_np)
     assert (n_channels == 3) or (n_channels == 1), "images should have 1 or 3 channels"
