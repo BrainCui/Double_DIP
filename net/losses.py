@@ -1,39 +1,15 @@
 import torch
 from torch import nn
 import numpy as np
-from .layers import bn, VarianceLayer, CovarianceLayer, GrayscaleLayer
 # from .downsampler import * 
 from torch.nn import functional
-
-
-class StdLoss(nn.Module):
-    def __init__(self):
-        """
-        Loss on the variance of the image.
-        Works in the grayscale.
-        If the image is smooth, gets zero
-        """
-        super(StdLoss, self).__init__()
-        blur = (1 / 25) * np.ones((5, 5))
-        blur = blur.reshape(1, 1, blur.shape[0], blur.shape[1])
-        self.mse = nn.MSELoss()
-        self.blur = nn.Parameter(data=torch.cuda.FloatTensor(blur), requires_grad=False)
-        image = np.zeros((5, 5))
-        image[2, 2] = 1
-        image = image.reshape(1, 1, image.shape[0], image.shape[1])
-        self.image = nn.Parameter(data=torch.cuda.FloatTensor(image), requires_grad=False)
-        self.gray_scale = GrayscaleLayer()
-
-    def forward(self, x):
-        x = self.gray_scale(x)
-        return self.mse(functional.conv2d(x, self.image), functional.conv2d(x, self.blur))
-
-
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 class ExclusionLoss(nn.Module):
 
     def __init__(self, level=3):
         """
-        Loss on the gradient. based on:
+        两个梯度的差别
+        参考了以下论文:
         http://openaccess.thecvf.com/content_cvpr_2018/papers/Zhang_Single_Image_Reflection_CVPR_2018_paper.pdf
         """
         super(ExclusionLoss, self).__init__()
@@ -83,85 +59,52 @@ class ExclusionLoss(nn.Module):
         return gradx, grady
 
 
-class ExtendedL1Loss(nn.Module):
-    """
-    also pays attention to the mask, to be relative to its size
-    """
-    def __init__(self):
-        super(ExtendedL1Loss, self).__init__()
-        self.l1 = nn.L1Loss().cuda()
 
-    def forward(self, a, b, mask):
-        normalizer = self.l1(mask, torch.zeros(mask.shape).cuda())
-        # if normalizer < 0.1:
-        #     normalizer = 0.1
-        c = self.l1(mask * a, mask * b) / normalizer
-        return c
+l1_loss = nn.L1Loss().to(device)
+def pre_loss(input_img, left_out, right_out, mask_out, fg_hint, bg_hint):
+    loss = 0
+    # loss += l1_loss(mask_out, torch.ones_like(mask_out) / 2)
 
+    normalizer = l1_loss(fg_hint, torch.zeros(fg_hint.shape).cuda())
+    loss += l1_loss(fg_hint * input_img, fg_hint * left_out) / normalizer
 
-class NonBlurryLoss(nn.Module):
-    def __init__(self):
-        """
-        Loss on the distance to 0.5
-        """
-        super(NonBlurryLoss, self).__init__()
-        self.mse = nn.MSELoss()
+    normalizer = l1_loss(bg_hint, torch.zeros(bg_hint.shape).cuda())
+    loss += l1_loss(bg_hint * input_img, bg_hint * right_out) / normalizer
 
-    def forward(self, x):
-        return 1 - self.mse(x, torch.ones_like(x) * 0.5)
+    loss += l1_loss((fg_hint - bg_hint + 1) / 2, mask_out)
 
+    return loss
 
-class GrayscaleLoss(nn.Module):
-    def __init__(self):
-        super(GrayscaleLoss, self).__init__()
-        self.gray_scale = GrayscaleLayer()
-        self.mse = nn.MSELoss().cuda()
+excl_loss = ExclusionLoss()
+def total_loss(epoch, input_img, left_out, right_out, mask_out, fg_hint, bg_hint):
+    loss = 0
+    epoch = min(epoch, 1000)
+    loss += 0.5 * reconst_loss(mask_out * left_out + (1 - mask_out) * right_out, input_img) + \
+            (0.001 * (epoch // 100)) * reg_loss(mask_out) + 0.5 * excl_loss(left_out, right_out)
 
-    def forward(self, x, y):
-        x_g = self.gray_scale(x)
-        y_g = self.gray_scale(y)
-        return self.mse(x_g, y_g)
+    if epoch <= 1000:  #
+        normalizer = l1_loss(fg_hint, torch.zeros(fg_hint.shape).cuda())
+        loss += l1_loss(fg_hint * input_img, fg_hint * left_out) / normalizer
 
+        normalizer = l1_loss(bg_hint, torch.zeros(bg_hint.shape).cuda())
+        loss += l1_loss(bg_hint * input_img, bg_hint * right_out) / normalizer
 
-class GrayLoss(nn.Module):
-    def __init__(self):
-        super(GrayLoss, self).__init__()
-        self.l1 = nn.L1Loss().cuda()
+    return loss
 
-    def forward(self, x):
-        y = torch.ones_like(x) / 2.
-        return 1 / self.l1(x, y)
+def reconst_loss(input_img, recomp_img):
+    '''
+    重构损失
+    :param recomp_img:
+    :param self:
+    :return:
+    '''
+    return l1_loss(input_img, recomp_img)
 
-
-class GradientLoss(nn.Module):
-    """
-    L1 loss on the gradient of the picture
-    """
-    def __init__(self):
-        super(GradientLoss, self).__init__()
-
-    def forward(self, a):
-        gradient_a_x = torch.abs(a[:, :, :, :-1] - a[:, :, :, 1:])
-        gradient_a_y = torch.abs(a[:, :, :-1, :] - a[:, :, 1:, :])
-        return torch.mean(gradient_a_x) + torch.mean(gradient_a_y)
-
-
-class YIQGNGCLoss(nn.Module):
-    def __init__(self, shape=5):
-        super(YIQGNGCLoss, self).__init__()
-        self.shape = shape
-        self.var = VarianceLayer(self.shape, channels=1)
-        self.covar = CovarianceLayer(self.shape, channels=1)
-
-    def forward(self, x, y):
-        if x.shape[1] == 3:
-            x_g = rgb_to_yiq(x)[:, :1, :, :]  # take the Y part
-            y_g = rgb_to_yiq(y)[:, :1, :, :]  # take the Y part
-        else:
-            assert x.shape[1] == 1
-            x_g = x  # take the Y part
-            y_g = y  # take the Y part
-        c = torch.mean(self.covar(x_g, y_g) ** 2)
-        vv = torch.mean(self.var(x_g) * self.var(y_g))
-        return c / vv
+def reg_loss(mask):
+    '''
+    正则损失(作为限制mask的先验)
+    :param mask:
+    :return:
+    '''
+    return 1 / l1_loss(mask, torch.ones_like(mask) / 2)
 

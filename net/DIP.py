@@ -16,7 +16,7 @@ class DIP(nn.Module):
         model_temp = self.model
         for i in range(len(down_channels)):
 
-            model_temp.add_module('down_con2=v1', nn.Conv2d(in_channels=in_channels, out_channels=down_channels[i],
+            model_temp.add_module('down_conv1', nn.Conv2d(in_channels=in_channels, out_channels=down_channels[i],
                                  kernel_size=3, stride=2, padding=1))  # 使用stride下采样
             model_temp.add_module('down_bn1', nn.BatchNorm2d(num_features=down_channels[i]))
             model_temp.add_module('down_relu1',nn.LeakyReLU(0.2, inplace=True))
@@ -27,15 +27,15 @@ class DIP(nn.Module):
 
 
 
-            if i == len(down_channels) - 1:  # 最深一层
-                deeper = nn.Sequential(
-                    nn.Conv2d(in_channels=down_channels[i], out_channels=up_channels[i],
-                              kernel_size=3, stride=1, padding=1),
-                    nn.BatchNorm2d(num_features=up_channels[i]),
-                    nn.LeakyReLU(0.2, inplace=True)
-                )
-            else:
-                deeper = nn.Sequential()   # deeper layers
+            # if i == len(down_channels) - 1:  # 最深一层
+            #     deeper = nn.Sequential(
+            #         nn.Conv2d(in_channels=down_channels[i], out_channels=up_channels[i],
+            #                   kernel_size=3, stride=1, padding=1),
+            #         nn.BatchNorm2d(num_features=up_channels[i]),
+            #         nn.LeakyReLU(0.2, inplace=True)
+            #     )
+            # else:
+            deeper = nn.Sequential()   # deeper layers
 
             skip = nn.Sequential()  # skip connection
             if skip_channels[i] != 0:
@@ -47,24 +47,29 @@ class DIP(nn.Module):
                 model_temp.add_module('skip+deeper', Concat(skip, deeper))  # 把该层的deeper和skip连接
             else:
                 model_temp.add_module('deeper', deeper)
+            last_channel = up_channels[i + 1] if i != len(down_channels) - 1 else down_channels[i]
 
-            next_channel = up_channels[i - 1] if i != 0 else out_channels
-            model_temp.add_module('up_bn1', nn.BatchNorm2d(num_features=up_channels[i] + skip_channels[i]))
-            model_temp.add_module('up_conv1', nn.Conv2d(in_channels=up_channels[i] + skip_channels[i],
-                                     out_channels=next_channel,
+            model_temp.add_module('up_bn1', nn.BatchNorm2d(num_features=last_channel + skip_channels[i]))
+            model_temp.add_module('up_conv1', nn.Conv2d(in_channels=last_channel + skip_channels[i],
+                                     out_channels=up_channels[i],
                                      kernel_size=3,
                                      padding=1))
-            model_temp.add_module('up_bn2', nn.BatchNorm2d(num_features=next_channel))
+            model_temp.add_module('up_bn2', nn.BatchNorm2d(num_features=up_channels[i]))
             model_temp.add_module('up_relu1', nn.LeakyReLU(0.2, inplace=True))
-            model_temp.add_module('up_conv2', nn.Conv2d(in_channels=next_channel,
-                                     out_channels=next_channel,
+            model_temp.add_module('up_conv2', nn.Conv2d(in_channels=up_channels[i],
+                                     out_channels=up_channels[i],
                                      kernel_size=3,
                                      padding=1))
-            model_temp.add_module('up_bn3', nn.BatchNorm2d(num_features=next_channel))
+            model_temp.add_module('up_bn3', nn.BatchNorm2d(num_features=up_channels[i]))
             model_temp.add_module('up_relu2', nn.LeakyReLU(0.2, inplace=True))
             model_temp.add_module('up_upsample', nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True))
             model_temp = deeper
             in_channels = down_channels[i]
+        
+        self.model.add_module('last_conv', nn.Conv2d(in_channels=up_channels[0],
+                                     out_channels=out_channels,
+                                     kernel_size=3,
+                                     padding=1))
         self.model.add_module('sigmoid', nn.Sigmoid())
 
     def forward(self, input):
