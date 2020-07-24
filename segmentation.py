@@ -98,13 +98,15 @@ class Segmentation(object):
             left_out, right_out, mask_out = self.forward_all(epoch, epochs_2)
 
             loss = total_loss(epoch, input_img, left_out, right_out, mask_out, fg_hint, bg_hint)
+            writer.add_scalar('train/loss', loss, epoch + 1)
+            writer.flush()
             loss.backward(retain_graph=True)
             optimizer.step()
             print('\tEpoch  {}  loss = {:.7f}'.format(epoch + 1, loss))
             if epoch % 500 == 0:
                 self.plot(str(epoch), input_img, left_out, right_out, mask_out)
-            writer.add_scalar('train/G_loss', loss, epoch + 1, walltime=epoch + 1)
-            writer.flush()
+            
+            
         self.plot('final', input_img, left_out, right_out, mask_out)
         writer.close()
 
