@@ -104,7 +104,9 @@ class Segmentation(object):
             if epoch % 500 == 0:
                 self.plot(str(epoch), input_img, left_out, right_out, mask_out)
             writer.add_scalar('train/G_loss', loss, epoch + 1, walltime=epoch + 1)
+            writer.flush()
         self.plot('final', input_img, left_out, right_out, mask_out)
+        writer.close()
 
     def forward_all(self, epoch, max_epoch):
         if epoch == max_epoch - 1:
