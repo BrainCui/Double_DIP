@@ -9,6 +9,7 @@ from net.losses import *
 # from net import skip, skip_mask
 from PIL import Image
 import argparse
+from torch.utils.tensorboard import SummaryWriter
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--output_path', type=str, default='output/')
@@ -69,6 +70,8 @@ class Segmentation(object):
         fg_hint = fg_hint.unsqueeze(0).to(device)
         bg_hint = bg_hint.unsqueeze(0).to(device)
         
+        
+        
         plot_image_grid("fg_bg", [torch_to_np(fg_hint * input_img), torch_to_np(bg_hint * input_img)], output_path=args.output_path)
 
         self.width = input_img.shape[2]
@@ -88,6 +91,7 @@ class Segmentation(object):
             print('\tEpoch  {}  loss = {:.7f}'.format(epoch + 1, loss))
 
         print('optimize Double-DIP:')
+        writer = SummaryWriter(log_dir="./log")
         for epoch in range(epochs_2):
             optimizer.zero_grad()
 
@@ -99,6 +103,7 @@ class Segmentation(object):
             print('\tEpoch  {}  loss = {:.7f}'.format(epoch + 1, loss))
             if epoch % 500 == 0:
                 self.plot(str(epoch), input_img, left_out, right_out, mask_out)
+            writer.add_scalar('train/G_loss', loss, epoch + 1, walltime=epoch + 1)
         self.plot('final', input_img, left_out, right_out, mask_out)
 
     def forward_all(self, epoch, max_epoch):
@@ -137,10 +142,9 @@ class Segmentation(object):
 
 seg = Segmentation()
 downsample = (64, 48)
-input_img = Image.open('./data/zebra.bmp')
-input_img = input_img.resize(downsample)
-input_img = np.array(input_img).astype(np.float32) / 255
-print(input_img.shape)
+input_img = Image.open('./data/zebra.bmp')     # 读取图像
+input_img = input_img.resize(downsample)       # 下采样到标准大小
+input_img = np.array(input_img).astype(np.float32) / 255    # 归一化，[0, 255] -> [0, 1]
 input_img = torch.from_numpy(input_img.transpose(2, 0, 1))
 
 fg_hint = Image.open('./data/fg_hint.bmp')
